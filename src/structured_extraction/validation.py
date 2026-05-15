@@ -218,26 +218,45 @@ def validate_ipid(ipid: IPIDExtraction) -> ValidationResult:
     # Rule 5: coverage categories should be diverse for a health insurance IPID
     if ipid.covered_items:
         categories = {item.category for item in ipid.covered_items}
-        expected_categories = {
-            CoverageCategory.ROUTINE_CARE,
-            CoverageCategory.HOSPITALIZATION,
-            CoverageCategory.OPTICAL,
-            CoverageCategory.DENTAL,
-        }
-        missing = expected_categories - categories
-        if missing:
-            all_errors.append(
-                ValidationError(
-                    field_path="covered_items",
-                    message=(
-                        f"Missing expected coverage categories: {[c.value for c in missing]}. "
-                        "A standard health IPID typically covers routine care, hospitalization, "
-                        "optical, and dental."
-                    ),
-                    severity=ValidationSeverity.WARNING,
-                    category=ValidationErrorCategory.COMPLETENESS,
+        # Only check health-specific categories for health products
+        # Prévoyance (TANDEM), Accident, and Protection Décès products
+        # legitimately lack dental, optical, routine_care categories
+        product_name_lower = (ipid.product_name or "").lower()
+        is_health_product = not any(
+            keyword in product_name_lower
+            for keyword in [
+                "tandem",
+                "accident",
+                "décès",
+                "deces",
+                "hospitalisation",
+                "prévoyance",
+                "prevoyance",
+            ]
+        )
+
+        if is_health_product:
+            expected_categories = {
+                CoverageCategory.ROUTINE_CARE,
+                CoverageCategory.HOSPITALIZATION,
+                CoverageCategory.OPTICAL,
+                CoverageCategory.DENTAL,
+            }
+            missing = expected_categories - categories
+            if missing:
+                all_errors.append(
+                    ValidationError(
+                        field_path="covered_items",
+                        message=(
+                            f"Missing expected coverage categories: {[c.value for c in missing]}. "
+                            "A standard health IPID typically covers routine care, "
+                            "hospitalization, "
+                            "optical, and dental."
+                        ),
+                        severity=ValidationSeverity.WARNING,
+                        category=ValidationErrorCategory.COMPLETENESS,
+                    )
                 )
-            )
 
     # Rule 6: "other" category must have category_detail
     for i, item in enumerate(ipid.covered_items):

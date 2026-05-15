@@ -513,3 +513,88 @@ class TestValidationResult:
         assert "INVALID" in summary
         assert "Errors: 1" in summary
         assert "Warnings: 1" in summary
+
+
+class TestProductTypeAwareValidation:
+    """Tests for product-type-aware category validation."""
+
+    def test_health_product_warns_on_missing_categories(self):
+        """Health products (API Santé) should warn about missing categories."""
+        ipid = _make_valid_ipid()
+        ipid.product_name = "API Santé Équilibre"
+        # Keep only routine_care items
+        ipid.covered_items = [
+            item for item in ipid.covered_items if item.category == CoverageCategory.ROUTINE_CARE
+        ]
+        result = validate_ipid(ipid)
+        category_warnings = [
+            e for e in result.warnings if "Missing expected coverage categories" in e.message
+        ]
+        assert len(category_warnings) > 0
+
+    def test_prevoyance_product_no_category_warning(self):
+        """Prévoyance products (TANDEM) should NOT warn about missing health categories."""
+        ipid = _make_valid_ipid()
+        ipid.product_name = "APICIL TANDEM"
+        ipid.covered_items = [
+            InsuredItem(
+                description="Incapacité temporaire de travail",
+                category=CoverageCategory.OTHER,
+                category_detail="prévoyance",
+            )
+        ]
+        result = validate_ipid(ipid)
+        category_warnings = [
+            e for e in result.warnings if "Missing expected coverage categories" in e.message
+        ]
+        assert len(category_warnings) == 0
+
+    def test_accident_product_no_category_warning(self):
+        """Accident products should NOT warn about missing health categories."""
+        ipid = _make_valid_ipid()
+        ipid.product_name = "APICIL Accident"
+        ipid.covered_items = [
+            InsuredItem(
+                description="Fracture accidentelle",
+                category=CoverageCategory.OTHER,
+                category_detail="accident",
+            )
+        ]
+        result = validate_ipid(ipid)
+        category_warnings = [
+            e for e in result.warnings if "Missing expected coverage categories" in e.message
+        ]
+        assert len(category_warnings) == 0
+
+    def test_deces_product_no_category_warning(self):
+        """Protection Décès should NOT warn about missing health categories."""
+        ipid = _make_valid_ipid()
+        ipid.product_name = "APICIL Protection Décès"
+        ipid.covered_items = [
+            InsuredItem(
+                description="Capital décès",
+                category=CoverageCategory.OTHER,
+                category_detail="décès",
+            )
+        ]
+        result = validate_ipid(ipid)
+        category_warnings = [
+            e for e in result.warnings if "Missing expected coverage categories" in e.message
+        ]
+        assert len(category_warnings) == 0
+
+    def test_hospitalisation_product_no_category_warning(self):
+        """Garantie Hospitalisation should NOT warn about missing dental/optical."""
+        ipid = _make_valid_ipid()
+        ipid.product_name = "APICIL Garantie Hospitalisation"
+        ipid.covered_items = [
+            InsuredItem(
+                description="Frais de séjour",
+                category=CoverageCategory.HOSPITALIZATION,
+            )
+        ]
+        result = validate_ipid(ipid)
+        category_warnings = [
+            e for e in result.warnings if "Missing expected coverage categories" in e.message
+        ]
+        assert len(category_warnings) == 0
