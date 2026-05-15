@@ -108,7 +108,7 @@ def build_batch_api_requests(submission: BatchSubmission) -> list[dict]:
             "custom_id": req.custom_id,
             "params": {
                 "model": submission.model,
-                "max_tokens": 4096,
+                "max_tokens": 8192,
                 "system": EXTRACTION_SYSTEM_PROMPT,
                 "tools": ALL_EXTRACTION_TOOLS,
                 "tool_choice": tool_choice,

@@ -701,7 +701,141 @@ uv run python scripts/extract_single.py
 
 On passe à la dernière étape : le README vitrine. C'est ce que les recruteurs lisent en premier sur ton repo GitHub. On va le structurer comme tes deux autres projets — avec l'architecture, les concepts de l'exam, les tradeoffs, et le domain coverage.
 
-## Étape 9 : README 
+
+## Étape 9 : Test grandeur nature , avec call à l'API Claude Sonnet-4-6 
+### test sur un single document 
+```bash 
+(structured-data-extraction) behramko@BehramMacbookPro structured-data-extraction  % uv run python scripts/extract_single.py "data/insurance_docs/API SANTE/IPID/SP24FCR0103 IPID API Santé Equilibre - MAJ- 052024.pdf"
+
+============================================================
+STRUCTURED DATA EXTRACTION PIPELINE — LIVE RUN
+============================================================
+
+[LOAD] Loaded: SP24FCR0103 IPID API Santé Equilibre - MAJ- 052024
+       Type: ipid | Pages: 2
+       Text length: 11,008 chars
+
+[EXTRACT] Running extraction with retry loop...
+          Extraction: VALID | Attempts: 1 | Errors: 0 | Warnings: 0
+          API Calls: 1 | Input: 9,342 tokens | Output: 3,560 tokens | Est. cost: $0.0271
+
+[RESULT] IPID Extraction:
+         Product: API Santé Équilibre
+         Insurer: APICIL Mutuelle
+         Registration: 302 927 553
+         Madelin eligible: True
+         Responsible contract: True
+         Covered items: 22
+         Not covered: 6
+         Exclusions: 9
+
+[VALIDATION] Validation: VALID | Errors: 0 | Warnings: 0 | Infos: 0
+
+[ROUTING] Review [SP24FCR0103 IPID API Santé Equilibre - MAJ- 052024]: auto_accept | Auto: 0 | Review: 0 | Reject: 0
+
+[SAVE] Extraction saved to data/results/last_extraction.json
+
+============================================================
+TOTAL COST: API Calls: 1 | Input: 9,342 tokens | Output: 3,560 tokens | Est. cost: $0.0271
+============================================================
+(structured-data-extraction) behramko@BehramMacbookPro structured-data-extraction  % 
+ *  History restored 
+
+behramko@BehramMacbookPro structured-data-extraction  %  source "/Users/behramko/Pojects_Data/structured-data-extraction /.venv/bin/activate"
+(structured-data-extraction) behramko@BehramMacbookPro structured-data-extraction  % 
+``` 
+
+C'est un sans-faute ! Regarde ces résultats :
+
+    VALID du premier coup — zéro retry nécessaire, la validation sémantique passe directement
+    22 covered items extraits, 6 not covered, 9 exclusions — c'est exhaustif pour un IPID de 2 pages
+    auto_accept — tous les champs en haute confiance, pas besoin de review humaine
+    $0.027 de coût — un seul appel API, ~13K tokens au total
+
+Regarde le JSON extrait pour voir la qualité de l'extraction :
+
+cat data/results/last_extraction.json | python3 -m json.tool | head -80
+
+
+### Et maintenant, testons avec un barème de garanties — c'est le document le plus complexe avec les tableaux de remboursement :
+```bash 
+uv run python scripts/extract_single.py "data/insurance_docs/API SANTE/Barèmes de garanties/BG par niveau/BG Equilibre/BG API Santé - Equilibre 1 avec PC MAJ 12.2025.pdf"
+```
+Le barème est beaucoup plus structuré (tableaux, pourcentages, forfaits, footnotes) — c'est le vrai test de notre pipeline. Partage-moi les deux sorties (le JSON de l'IPID et le résultat du barème) !
+
+Résultats : Excellent résultat pédagogique ! L'IPID passe parfaitement, et le barème de garanties échoue — mais pour une raison très intéressante et instructive.
+
+Analyse du problème
+
+Regarde l'erreur :
+```bash 
+benefits
+  Field required [type=missing, input_value={'product_name': 'API San...
+  '€': 'euros'}}, input_type=dict]
+  ```
+
+Et surtout : Output: 4,096 tokens — c'est exactement le max_tokens qu'on a défini ! Claude a été coupé en plein milieu de sa réponse. Le barème de garanties est un document dense avec beaucoup de lignes de prestations — la réponse structurée est trop longue pour tenir dans 4096 tokens. Claude n'a pas eu le temps de terminer le JSON, donc le champ benefits est incomplet ou absent.
+
+C'est un cas réel de production — l'exam guide en parle : "stop_reason: max_tokens — the output may be incomplete and not match your schema".
+
+La solution : augmenter max_tokens pour les documents denses. Corrigeons ça.
+
+Commande — Modifie le max_tokens dans extraction.py :
+
+Résultats `; 
+
+'extraction du barème de garanties échoue encore malgré le passage à 8192 tokens. Le problème est probablement que Claude retourne bien les données, mais que la structure JSON ne correspond pas exactement au schéma Pydantic GuaranteeTableExtraction — en particulier le champ benefits qui est manquant dans la réponse parsée.
+
+Faisons un diagnostic précis.
+-> Haha oui, c'est une leçon classique en production ! Le rate limit silencieux qui cause des erreurs mystérieuses — c'est exactement le genre de problème qu'on rencontre en vrai. Maintenant tu as une bonne anecdote pour les entretiens.
+
+Et regarde ce résultat — 50 benefits extraits, validation VALID, auto_accept ! Le pipeline fonctionne parfaitement de bout en bout sur le document le plus complexe.
+
+Analysons ce qui s'est passé :
+
+L'extraction a nécessité 2 tentatives — la première a probablement eu quelques erreurs de validation sémantique que le retry a corrigées automatiquement. C'est exactement le pattern qu'on a construit : extraire → valider → feedback → re-extraire. Le coût total est de $0.10, ce qui est raisonnable pour un document tabulaire dense de 50 lignes de garanties.
+
+Petit point d'attention : on utilise haiku et ça coûte déjà $0.10 pour un seul document (2 appels, ~46K tokens au total). En production avec des centaines de documents, c'est là que le Message Batches API qu'on a implémenté prend tout son sens — 50% de réduction sur ce coût.
+
+Maintenant, vérifions la qualité de l'extraction. Regarde les premiers benefits extraits :
+
+C'est excellent ! L'extraction est de très haute qualité :
+
+50 benefits répartis en 5 catégories bien distinctes — routine_care (16), hospitalization (12), dental (11), optical (7), hearing (4) — c'est exactement la structure d'un contrat santé français. Le fait que les enums CoverageCategory couvrent parfaitement les données réelles montre que notre schéma est bien conçu.
+
+7 options comfort pack correctement séparées des garanties de base — Claude a compris la distinction structurelle du document entre le socle de garanties et le pack confort optionnel. C'est impressionnant pour un modèle haiku.
+
+Point pédagogique — Pourquoi 2 tentatives ? La première tentative a probablement eu une erreur de validation sémantique (peut-être un pourcentage mal parsé ou une catégorie manquante). Le retry a corrigé ça grâce au feedback de validation. C'est exactement le pattern du Scenario 6 (Task 4.4) : le modèle apprend de ses erreurs spécifiques, pas juste "réessaie". Le coût du retry ($0.10 au total) est acceptable parce qu'on obtient un résultat validé et fiable.
+
+Maintenant, committons toutes les corrections. D'abord, vérifions ce qui a changé :
+## Session 3 — Debug & Live Extraction (2026-05-15)
+
+### Problème rencontré
+L'extraction du barème de garanties (BG) échouait systématiquement avec `Field required [type=missing]` sur le champ `benefits`.
+
+### Diagnostic
+1. Ajout d'un script de debug pour capturer la réponse brute de Claude
+2. Découverte que le schéma Pydantic et la réponse Claude étaient **parfaitement alignés**
+3. Cause réelle : **le rate limit API ($5/mois) avait été atteint**, coupant la réponse en plein milieu de la génération JSON
+4. Le `stop_reason` retourné n'indiquait pas clairement la troncature due au rate limit
+
+### Corrections appliquées
+- `max_tokens` augmenté de 4096 → 8192 (puis 16384 pour le debug)
+- Ajout de l'argument `--model` au script `extract_single.py`
+- Augmentation du seuil de dépense API
+
+### Résultats live
+- **IPID** : 22 covered items, 6 not covered, 9 exclusions — extraction en 1 tentative, $0.027
+- **Barème de garanties** : 50 benefits en 5 catégories + 7 options comfort pack — extraction en 2 tentatives, $0.10
+- Validation sémantique : VALID, 0 erreurs, 0 warnings
+- Routing : auto_accept (confiance haute)
+
+### Leçon apprise
+En production, les erreurs d'API (rate limit, timeout, quota) peuvent se manifester comme des erreurs de parsing/validation. Toujours inspecter la donnée brute avant de modifier le code de traitement.
+
+
+
+## Étape 10: README 
 
 Commande — Crée le README.md :
 
@@ -783,3 +917,20 @@ Pour continuer à enrichir ton portfolio après le push GitHub :
     - Ajouter un schéma pour les tarifs (pricing) — ça montre que l'architecture est extensible
     
     - Connecter avec ton projet OpenClaw — le pipeline d'extraction alimente le RAG de l'assistant courtier
+
+
+
+## En Résumé 
+Ton pipeline est un système de traitement spécialisé — un workflow d'extraction end-to-end avec une logique métier riche. Il prend des PDFs d'assurance APICIL en entrée et produit des données structurées validées en sortie. L'intelligence de ton système réside dans l'orchestration de multiples étapes : extraction via tool_use avec des schémas Pydantic, validation sémantique multicouche (cohérence interne, plausibilité des valeurs, complétude), retry ciblé avec feedback d'erreur, scoring de confiance par champ, routage vers revue humaine, quality review indépendante par une seconde instance Claude, et batch processing pour l'optimisation des coûts.
+
+## Evo possible 
+Là où ça devient intéressant, c'est si tu réfléchis à l'étape suivante. Imagine que tu veuilles rendre ton pipeline accessible à un agent IA conversationnel. Tu pourrais exposer ton pipeline en tant que serveur MCP avec des outils comme :
+
+    extract_insurance_document(pdf_url) — lance ton pipeline complet sur un document
+    get_extraction_status(job_id) — vérifie l'état d'un traitement
+    list_pending_reviews() — liste les extractions en attente de revue humaine
+    get_extraction_result(job_id) — récupère le résultat structuré
+
+À ce moment-là, un utilisateur pourrait dire à Claude Desktop : "Extrais les données de ce PDF APICIL" et l'agent appellerait ton serveur MCP, qui déclencherait en interne tout ton pipeline (extraction, validation, retry, confidence routing...). Ton pipeline deviendrait le backend derrière une interface MCP.
+
+Donc ton pipeline et un MCP ne sont pas en compétition — ils sont complémentaires. Ton pipeline pourrait tout à fait être wrappé dans un serveur MCP pour le rendre accessible de manière conversationnelle. Ce serait d'ailleurs une extension naturelle assez élégante de ton projet.

@@ -202,6 +202,7 @@ def extract_document(
     source_file: str,
     client: Anthropic | None = None,
     model: str = "claude-haiku-4-5",
+    max_tokens: int = 8192,
     token_usage: TokenUsage | None = None,
 ) -> ExtractionResult:
     """Extract structured data from an insurance document.
@@ -236,7 +237,7 @@ def extract_document(
     try:
         message = client.messages.create(
             model=model,
-            max_tokens=4096,
+            max_tokens=max_tokens,
             system=EXTRACTION_SYSTEM_PROMPT,
             tools=tools,
             tool_choice=tool_choice,

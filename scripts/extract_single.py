@@ -141,7 +141,7 @@ def run_demo_dry_run():
     print("=" * 60)
 
 
-def run_real_extraction(file_path: str | None = None):
+def run_real_extraction(file_path: str | None = None, model: str = "claude-haiku-4-5"):
     """Run the full pipeline with real API calls."""
     from dotenv import load_dotenv
     load_dotenv()
@@ -185,6 +185,7 @@ def run_real_extraction(file_path: str | None = None):
         document_type=doc_type,
         source_file=source_file,
         client=client,
+        model=model,
         token_usage=token_usage,
         config=RetryConfig(max_retries=2),
     )
@@ -257,7 +258,18 @@ def run_real_extraction(file_path: str | None = None):
 if __name__ == "__main__":
     import os
 
-    file_arg = sys.argv[1] if len(sys.argv) > 1 else None
+    # Parse --model if provided
+    model = "claude-haiku-4-5"
+    remaining_args = []
+    i = 1
+    while i < len(sys.argv):
+        if sys.argv[i] == "--model" and i + 1 < len(sys.argv):
+            model = sys.argv[i + 1]
+            i += 2
+        else:
+            remaining_args.append(sys.argv[i])
+            i += 1
+    file_arg = remaining_args[0] if remaining_args else None
 
     if os.getenv("ANTHROPIC_API_KEY") or (file_arg and Path(file_arg).exists()):
         # Try loading .env first
@@ -268,7 +280,7 @@ if __name__ == "__main__":
             pass
 
         if os.getenv("ANTHROPIC_API_KEY"):
-            run_real_extraction(file_arg)
+            run_real_extraction(file_arg, model=model)
         else:
             run_demo_dry_run()
     else:
