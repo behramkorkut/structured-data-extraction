@@ -21,6 +21,75 @@ DOCUMENT_TYPE_PATTERNS: dict[str, list[str]] = {
 }
 
 
+# Types with a full extraction schema (tool_use + Pydantic model + validation)
+SUPPORTED_EXTRACTION_TYPES: set[str] = {"ipid", "guarantee_table"}
+
+# Types we recognise but cannot extract yet (no schema defined)
+RECOGNISED_UNSUPPORTED_TYPES: set[str] = {
+    "product_sheet",
+    "pricing",
+    "reimbursement_example",
+    "information_notice",
+    "commercial_brochure",
+}
+
+
+def is_extraction_supported(document_type: str) -> bool:
+    """Check whether a document type has a full extraction schema.
+
+    Args:
+        document_type: The detected document type string.
+
+    Returns:
+        True if the pipeline can extract structured data from this type.
+    """
+    return document_type in SUPPORTED_EXTRACTION_TYPES
+
+
+def get_unsupported_reason(document_type: str) -> str:
+    """Return a human-readable explanation for why extraction is not supported.
+
+    Args:
+        document_type: The detected document type string.
+
+    Returns:
+        Explanation string with suggested next steps.
+    """
+    type_descriptions = {
+        "product_sheet": (
+            "Product sheets contain marketing and summary information. "
+            "A dedicated schema with fields like target_audience, "
+            "key_selling_points, and eligibility_criteria would be needed."
+        ),
+        "pricing": (
+            "Pricing documents contain tariff tables by age/region. "
+            "A dedicated schema with fields like age_brackets, "
+            "monthly_premiums, and regional_multipliers would be needed."
+        ),
+        "reimbursement_example": (
+            "Reimbursement examples show concrete cost scenarios. "
+            "A dedicated schema with fields like scenario_description, "
+            "total_cost, ss_reimbursement, and insurer_reimbursement would be needed."
+        ),
+        "information_notice": (
+            "Information notices contain legal and regulatory text. "
+            "A dedicated schema with fields like articles, "
+            "effective_date, and regulatory_references would be needed."
+        ),
+        "commercial_brochure": (
+            "Commercial brochures contain marketing material. "
+            "A dedicated schema with product highlights and "
+            "comparison tables would be needed."
+        ),
+    }
+    if document_type in type_descriptions:
+        return type_descriptions[document_type]
+    return (
+        f"Document type '{document_type}' is not recognised. "
+        "Check the filename or add a new detection pattern."
+    )
+
+
 @dataclass
 class InsuranceDocument:
     """Represents a loaded insurance document with metadata.

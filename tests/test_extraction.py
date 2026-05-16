@@ -441,31 +441,21 @@ class TestExtractDocument:
         assert result.extraction_errors is not None
         assert "API call failed" in result.extraction_errors[0]
 
-    def test_extract_unknown_type_uses_any(self):
-        """Unknown document type should use tool_choice 'any'."""
+    def test_extract_unknown_type_blocked(self):
+        """Unknown document type should be blocked before API call."""
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = self._mock_tool_response(
-            "extract_ipid",
-            {
-                "product_name": "Test",
-                "insurer_name": "Test",
-                "insurance_type": "Test",
-                "covered_items": [],
-                "not_covered_items": [],
-                "exclusions": [],
-            },
-        )
 
-        extract_document(
+        result = extract_document(
             text_content="content",
             document_type="unknown",
             source_file="test.pdf",
             client=mock_client,
         )
 
-        # Verify the API was called with tool_choice "any"
-        call_kwargs = mock_client.messages.create.call_args
-        assert call_kwargs.kwargs["tool_choice"] == {"type": "any"}
+        # Verify API was NOT called (graceful degradation)
+        mock_client.messages.create.assert_not_called()
+        assert result.extraction_errors
+        assert "not supported" in result.extraction_errors[0].lower()
 
     def test_extract_ipid_uses_forced_selection(self):
         """Known IPID should use forced tool selection."""
@@ -491,3 +481,64 @@ class TestExtractDocument:
 
         call_kwargs = mock_client.messages.create.call_args
         assert call_kwargs.kwargs["tool_choice"] == {"type": "tool", "name": "extract_ipid"}
+
+
+class TestGracefulDegradationExtraction:
+    """Tests that unsupported types are blocked before API call."""
+
+    def test_product_sheet_returns_error_without_api_call(self):
+        """Product sheets should be rejected without calling Claude."""
+        result = extract_document(
+            text_content="Some product sheet content",
+            document_type="product_sheet",
+            source_file="fiche_produit.pdf",
+            client=None,  # Would fail if API was called
+        )
+        assert result.extraction_errors
+        assert "not supported" in result.extraction_errors[0].lower()
+        assert result.ipid is None
+        assert result.guarantee_table is None
+
+    def test_pricing_returns_error_without_api_call(self):
+        result = extract_document(
+            text_content="Pricing content",
+            document_type="pricing",
+            source_file="tarifs.pdf",
+            client=None,
+        )
+        assert result.extraction_errors
+        assert "not supported" in result.extraction_errors[0].lower()
+
+    def test_unknown_returns_error_without_api_call(self):
+        result = extract_document(
+            text_content="Unknown content",
+            document_type="unknown",
+            source_file="mystery.pdf",
+            client=None,
+        )
+        assert result.extraction_errors
+        assert "not supported" in result.extraction_errors[0].lower()
+
+    def test_unsupported_type_mentions_reason(self):
+        result = extract_document(
+            text_content="Content",
+            document_type="product_sheet",
+            source_file="test.pdf",
+            client=None,
+        )
+        assert "schema" in result.extraction_errors[0].lower()
+
+    def test_unsupported_type_saves_zero_cost(self):
+        """No API call means no tokens used."""
+        from src.structured_extraction.extraction import TokenUsage
+
+        usage = TokenUsage()
+        extract_document(
+            text_content="Content",
+            document_type="product_sheet",
+            source_file="test.pdf",
+            client=None,
+            token_usage=usage,
+        )
+        assert usage.input_tokens == 0
+        assert usage.output_tokens == 0

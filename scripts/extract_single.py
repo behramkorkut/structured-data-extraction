@@ -25,6 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.structured_extraction.document_loader import load_document, detect_document_type
 from src.structured_extraction.extraction import TokenUsage
+from src.structured_extraction.document_loader import (
+    is_extraction_supported,
+    get_unsupported_reason,
+)
 from src.structured_extraction.retry import extract_with_retry, RetryConfig
 from src.structured_extraction.validation import validate_extraction
 from src.structured_extraction.confidence import route_for_review
@@ -177,6 +181,21 @@ def run_real_extraction(file_path: str | None = None, model: str = "claude-haiku
     print(f"       Text length: {len(text_content):,} chars")
     print()
 
+    # --- Check if document type is supported ---
+    if not is_extraction_supported(doc_type):
+        print(f"[SKIP] Document type '{doc_type}' is not supported for extraction.")
+        print(f"       Reason: {get_unsupported_reason(doc_type)}")
+        print()
+        print("       Supported types: ipid, guarantee_table")
+        print("       To add support, implement:")
+        print("         1. Pydantic model in schemas.py")
+        print("         2. tool_use definition in extraction.py")
+        print("         3. Validation rules in validation.py")
+        print()
+        print("       This document was skipped — no API call was made.")
+        print("       (Graceful degradation: CCA-F Domain 5 — Reliability)")
+        return
+    
     # Extract with retry
     token_usage = TokenUsage()
     print("[EXTRACT] Running extraction with retry loop...")

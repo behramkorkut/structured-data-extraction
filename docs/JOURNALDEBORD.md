@@ -1,11 +1,40 @@
 # Scenario 6 
-Perspectives : Scénario 6 — Structured Data Extraction
+Perspectives : Scénario 6 — Structured Data Extraction pipeline
+
+## L'intérêt de ce type de pipeline 
+Le problème que résout ce pipeline et qu'un ETL classique ne peut pas résoudre
+
+Dans un pipeline ETL/ELT classique avec Airflow + dbt + PostgreSQL, tu travailles avec des données déjà structurées ou semi-structurées avec un format prévisible. Par exemple, tu reçois un CSV avec des colonnes fixes, un JSON d'une API avec un schéma documenté, ou une table SQL avec des types définis. Le travail du data engineer, c'est orchestrer les flux, transformer, nettoyer, valider, charger. Airflow gère le "quand" et le "dans quel ordre", dbt gère le "comment transformer", PostgreSQL ou MongoDB gère le "où stocker".
+
+Notre pipeline intervient avant tout ça. Il résout le problème de la zone grise entre le monde non structuré (un PDF d'assurance écrit en français, avec des tableaux mal formatés, des notes de bas de page, des abréviations métier comme "BR-SS") et le monde structuré (un JSON validé par Pydantic qu'on peut ensuite charger dans PostgreSQL). C'est la partie la plus difficile et la plus coûteuse d'un pipeline de données documentaires — historiquement, elle nécessitait soit des regex fragiles, soit de l'OCR + des règles manuelles, soit des équipes entières de saisie manuelle.
+
+Ce que le LLM apporte concrètement
+
+Un parser classique (regex, xpath, template matching) nécessite une règle par format de document. Si APICIL change la mise en page de son barème de garanties, le parser casse. Si tu reçois un document d'un autre assureur avec une structure différente, il faut réécrire les règles. Avec un LLM, le "parsing" est sémantique : Claude comprend que "100% BR - SS" signifie "remboursement à 100% de la base de remboursement moins la part Sécurité Sociale" même si c'est écrit différemment d'un document à l'autre. C'est cette capacité de généralisation qui est impossible avec un ETL classique.
+
+Mais — et c'est le point crucial — le LLM seul ne suffit pas. Sans le tool_use qui force un schéma JSON strict, Claude pourrait retourner du texte libre. Sans la validation Pydantic, on ne détecterait pas les hallucinations. Sans le retry avec feedback, les erreurs sémantiques persisteraient. Sans le confidence scoring, on enverrait des données douteuses en production. C'est exactement ce qu'Anthropic veut démontrer avec le Scenario 6.
+
+Ce qu'Anthropic veut démontrer
+
+Le message d'Anthropic est que l'intelligence artificielle n'est pas un remplacement magique des pipelines de données — c'est une nouvelle brique dans l'architecture. Le Scenario 6 montre comment intégrer un LLM de manière fiable et industrielle dans un pipeline, avec les mêmes exigences de qualité qu'un ETL classique : validation, retry, monitoring, coûts maîtrisés, traçabilité. Ils veulent former des architectes qui savent quand utiliser un LLM (extraction de données non structurées, classification ambiguë, normalisation sémantique) et quand ne pas l'utiliser (agrégation SQL, jointures, transformations déterministes — là où dbt est imbattable).
+
+En pratique, les deux mondes se complètent
+
+L'architecture réaliste en production ressemblerait à ceci. Airflow orchestre le pipeline global : un premier step récupère les PDFs depuis un bucket S3 ou un email. Le deuxième step, c'est notre pipeline — il extrait les données structurées via Claude, valide, et produit des JSON. Le troisième step charge ces JSON dans PostgreSQL (ou MongoDB si tu veux garder la flexibilité du schéma). Le quatrième step, c'est dbt qui transforme les données extraites : calcul de métriques, agrégation par produit, comparaison entre niveaux de garantie, détection d'anomalies. Le LLM gère l'entrée non structurée → structurée, le reste du pipeline reste classique.
+
+C'est pour ça que ton profil est intéressant pour les recruteurs : tu sais faire du pipeline classique ET tu sais intégrer de l'IA de manière industrielle. Ce n'est pas "Claude remplace Airflow", c'est "Claude s'insère dans Airflow pour résoudre un problème que les outils classiques ne peuvent pas traiter".
 
 Tu as raison, ce scénario est parfaitement aligné avec ton profil de futur Data Engineer. Là où le Scénario 3 testait l'orchestration multi-agent, le Scénario 6 teste la fiabilité de l'extraction de données — un sujet au cœur du métier de Data Engineer.
-Ce que le Scénario 6 couvre
 
-D'après le guide officiel de l'examen, les compétences clés testées sont le JSON schema design pour tool_use, l'implémentation de boucles validation-retry, le few-shot prompting pour la cohérence de format, et la confiance au niveau des champs avec human review.
-Les concepts qui changent par rapport au Scénario 3
+## Ce que le Scénario 6 couvre
+
+D'après le guide officiel de l'examen, les compétences clés testées sont :  
+- le JSON schema design pour tool_use, 
+- l'implémentation de boucles validation-retry, 
+- le few-shot prompting pour la cohérence de format, 
+- et la confiance au niveau des champs avec human review.
+
+### Les concepts qui changent par rapport au Scénario 3
 
 tool_use pour garantir la structure, pas la sémantique. Dans le Scénario 3, tes sous-agents retournaient du texte libre (JSON dans une string). Dans le Scénario 6, tu utilises tool_use avec un JSON schema strict pour que Claude retourne directement un objet structuré. Le piège de l'examen : beaucoup de candidats pensent que tool_use élimine toutes les erreurs. En réalité, il garantit que tu reçois un JSON valide avec les bons types et les bons champs — mais la valeur dans chaque champ peut être fausse. Un montant de facture peut être extrait comme "total": 450.00 alors que le vrai montant est $500.00. C'est pour ça que la boucle validation-retry existe.
 
@@ -20,10 +49,10 @@ Les métriques stratifiées. C'est le concept anti-pattern #10 : si tu mesures l
 Le Batch API. Pour le traitement en volume (audits nocturnes, scans hebdomadaires), l'examen attend que tu utilises le Batch API d'Anthropic qui offre 50% de réduction. Pour les tâches bloquantes (review de PR, extraction temps réel), tu restes en synchrone. C'est un choix d'architecture que l'examen teste.
 Le lien avec ton profil Data Engineer
 
-Le Scénario 6 est essentiellement un pipeline ETL intelligent : tu prends des documents non structurés (PDF de factures, contrats, reçus), tu en extrais des données structurées (JSON validé), tu gères les erreurs et les cas limites (champs manquants, formats incohérents), et tu monitores la qualité par catégorie. La seule différence avec un pipeline classique, c'est que l'étape "Transform" est faite par Claude au lieu d'expressions régulières ou de règles codées en dur. Ton expérience RAG avec Puls-Events (extraction d'événements depuis l'API OpenAgenda) et ton Scénario 3 (provenance, erreurs structurées) te donnent une base solide pour attaquer le Scénario 6.
-Ce que tu pourrais construire
+Le Scénario 6 est essentiellement un pipeline ETL intelligent : tu prends des documents non structurés (PDF de factures, contrats, reçus), tu en extrais des données structurées (JSON validé), tu gères les erreurs et les cas limites (champs manquants, formats incohérents), et tu monitores la qualité par catégorie. 
 
-Un pipeline qui prend des factures PDF simulées, extrait les champs via tool_use avec un schema strict (nullable fields pour les champs optionnels), valide chaque extraction (totaux cohérents, dates valides, formats corrects), retry avec erreurs spécifiques si la validation échoue, et track la précision par type de document. C'est un projet portfolio parfait pour un Data Engineer qui montre qu'il sait gérer la qualité des données même quand la source est un LLM.
+La seule différence avec un pipeline classique, c'est que l'étape "Transform" est faite par Claude au lieu d'expressions régulières ou de règles codées en dur. Ton expérience RAG avec Puls-Events (extraction d'événements depuis l'API OpenAgenda) et ton Scénario 3 (provenance, erreurs structurées) te donnent une base solide pour attaquer le Scénario 6.
+
 
 
 # Scenario 6 : Structured Data Extraction Pipeline — Plan du Projet
@@ -833,7 +862,85 @@ L'extraction du barème de garanties (BG) échouait systématiquement avec `Fiel
 ### Leçon apprise
 En production, les erreurs d'API (rate limit, timeout, quota) peuvent se manifester comme des erreurs de parsing/validation. Toujours inspecter la donnée brute avant de modifier le code de traitement.
 
+## Lançons 3 tests stratégiques :
 
+Test 1 — IPID d'un produit très différent (TANDEM = prévoyance TNS, pas santé)
+
+uv run python scripts/extract_single.py "data/insurance_docs/APICIL TANDEM/0. Documents précontractuels/SP26FCR0066- IPID TANDEM - 02.2026.pdf"
+
+Test 2 — IPID Accident (encore un autre type de produit)
+
+uv run python scripts/extract_single.py "data/insurance_docs/APICIL Accident/0. Documents Précontractuels/IPID APICIL Accident_AM_SP18FCR0560_2024.pdf"
+
+Test 3 — Un document NON supporté (fiche produit) pour voir si le pipeline gère gracieusement
+
+uv run python scripts/extract_single.py "data/insurance_docs/APICIL TANDEM/2. Documents Produit/SP25-FCR0601_Fiche produit TANDEM 01.2026.pdf"
+
+Lance les 3 commandes l'une après l'autre et partage les résultats. On vérifie :
+
+    Est-ce que l'IPID TANDEM (prévoyance) s'extrait aussi bien que l'IPID API Santé (santé) ?
+    Est-ce que l'IPID Accident fonctionne ?
+    Est-ce que la fiche produit (type non supporté) échoue proprement sans crash ?
+
+C'est le moment clé du projet — on passe du "ça marche sur mon cas de test" à "ça marche en conditions réelles". En data engineering, cette étape révèle toujours des surprises.
+
+### Resultats
+Résultats très intéressants ! Les 3 tests révèlent à la fois des forces et des axes d'amélioration du pipeline :
+
+Test 1 — IPID TANDEM (prévoyance TNS) : Extraction parfaite en 1 tentative, $0.031. Le pipeline a correctement identifié que TANDEM est éligible Madelin (c'est un produit TNS) et n'est PAS un contrat responsable (logique, c'est de la prévoyance, pas de la santé). 17 garanties couvertes, 15 exclusions — cohérent pour un produit prévoyance.
+
+Test 2 — IPID Accident : Extraction parfaite en 1 tentative, $0.017. Le plus petit document (6 680 chars). Claude a correctement renvoyé None pour madelin_eligible et responsible_contract — ces concepts ne s'appliquent pas à une garantie accident. C'est exactement le comportement qu'on voulait avec nos champs nullable.
+
+Test 3 — Fiche produit TANDEM : C'est le cas le plus révélateur. Le document est de type product_sheet (16 pages, 48 862 chars !), mais le pipeline l'a quand même extrait comme un IPID. Ça fonctionne (VALID), mais c'est un faux positif — on force l'extraction IPID sur un document qui n'en est pas un.
+
+Le warning commun aux 3 tests est très pertinent : "Missing expected coverage categories: dental, hospitalization, routine_care, optical". C'est parce que notre validation suppose un produit santé, mais TANDEM et Accident ne sont pas des produits santé. C'est une amélioration qu'on peut faire.
+
+Il y a deux choses à corriger :
+
+Correction 1 — Le routing des product_sheet ne devrait pas forcer un outil IPID ou guarantee_table. Vérifions ce qui se passe dans get_tool_choice :
+
+cd ~/structured-data-extraction && grep -A 20 "def get_tool_choice" src/structured_extraction/extraction.py
+
+Correction 2 — Le warning sur les catégories manquantes devrait être conditionné au type de produit (santé vs prévoyance vs accident). Vérifions la règle de validation :
+
+cd ~/structured-data-extraction && grep -B 2 -A 10 "Missing expected coverage" src/structured_extraction/validation.py
+
+--> Faisons les deux corrections :
+
+Correction 1 — La validation des catégories doit être conditionnelle au type de produit. On va vérifier si le produit est de type "santé" avant d'exiger les catégories santé.
+
+Correction 2 — Pour les product_sheet, le pipeline force tool_choice: "any" ce qui est correct, mais le résultat est affiché comme "IPID Extraction" dans le script, ce qui est trompeur.
+
+Appliquons les fixes :
+
+Impeccable — 216 tests, 0 erreurs ruff, tout formaté. On commit :
+
+
+
+
+## La gestion élégante des documents non supportés. 
+On va implémenter un pattern de graceful degradation — le pipeline reconnaît qu'il ne sait pas traiter un type de document, le signale clairement, et propose une action (skip, log, ou extraction partielle). Voici ce qu'on va faire :
+
+L'approche qu'on va implémenter est un pattern de graceful degradation en trois niveaux :
+
+    1. Types supportés (ipid, guarantee_table) → extraction complète avec tool_choice forcé
+    2. Types reconnus mais non supportés (product_sheet, pricing, notice) → le pipeline le signale explicitement, log le document, et retourne un résultat partiel ou un skip propre avec un message clair
+    3. Types inconnus → même traitement que le niveau 2, mais avec un flag supplémentaire
+
+L'idée clé c'est qu'un pipeline intelligent doit savoir dire "je ne sais pas traiter ce document" au lieu de produire des données fausses en silence. En data engineering, les données fausses sont pires que les données manquantes.
+
+### Point pédagogique 
+Claude comprend le contenu d'une fiche produit TANDEM de 16 pages. Il peut te la résumer, répondre à des questions dessus, identifier les garanties, les exclusions, les tarifs. Le LLM n'est pas limité dans sa compréhension — il est limité dans ce qu'on lui demande de produire.
+
+Quand on lui donne un document product_sheet avec tool_choice: "any", il est forcé de choisir entre deux outils : extract_ipid et extract_guarantee_table. Aucun des deux ne correspond vraiment à une fiche produit. Alors il fait au mieux — il essaie de remplir le schéma IPID avec ce qu'il trouve dans la fiche produit. C'est pour ça que l'extraction de la fiche TANDEM a "fonctionné" techniquement (17 items, validation VALID) mais le résultat est trompeur : on a extrait des données à travers un prisme qui n'est pas le bon.
+
+C'est exactement comme en SQL. Si tu as une table orders et que tu essaies de la requêter avec un schéma conçu pour une table customers, tu vas obtenir des résultats — PostgreSQL ne va pas crasher — mais les données n'auront pas de sens. Le problème n'est pas la base de données, c'est la requête.
+
+Dans notre pipeline, le "schéma de requête" c'est le tool_use avec son JSON schema. Pour supporter un nouveau type de document, il faut trois choses : un modèle Pydantic qui décrit les champs qu'on veut extraire (qu'est-ce qui est intéressant dans une fiche produit ?), un outil tool_use avec le JSON schema correspondant, et des règles de validation sémantique adaptées. C'est du travail d'ingénierie, pas un problème d'intelligence du modèle.
+
+Et c'est pour ça que la gestion élégante des documents non supportés est si importante. Plutôt que de laisser Claude improviser avec un mauvais schéma, on préfère dire clairement "ce document est de type product_sheet, nous n'avons pas encore de schéma d'extraction pour ce type, voici les options". C'est le principe du fail-fast en ingénierie — mieux vaut une erreur explicite qu'un résultat silencieusement faux.
+
+Implémentons ça. D'abord, montre-moi les types de documents et la détection :
 
 ## Étape 10: README 
 

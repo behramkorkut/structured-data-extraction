@@ -5,9 +5,12 @@ from pathlib import Path
 import pytest
 
 from src.structured_extraction.document_loader import (
+    RECOGNISED_UNSUPPORTED_TYPES,
     InsuranceDocument,
     detect_document_type,
     detect_product_line,
+    get_unsupported_reason,
+    is_extraction_supported,
     load_document,
     load_text_from_file,
 )
@@ -147,3 +150,51 @@ class TestLoadDocument:
         doc = load_document(txt_file)
         assert doc.file_path == txt_file
         assert doc.file_name == "test"
+
+
+class TestGracefulDegradation:
+    """Tests for supported/unsupported document type detection."""
+
+    def test_ipid_is_supported(self):
+        assert is_extraction_supported("ipid") is True
+
+    def test_guarantee_table_is_supported(self):
+        assert is_extraction_supported("guarantee_table") is True
+
+    def test_product_sheet_not_supported(self):
+        assert is_extraction_supported("product_sheet") is False
+
+    def test_pricing_not_supported(self):
+        assert is_extraction_supported("pricing") is False
+
+    def test_reimbursement_example_not_supported(self):
+        assert is_extraction_supported("reimbursement_example") is False
+
+    def test_information_notice_not_supported(self):
+        assert is_extraction_supported("information_notice") is False
+
+    def test_commercial_brochure_not_supported(self):
+        assert is_extraction_supported("commercial_brochure") is False
+
+    def test_unknown_not_supported(self):
+        assert is_extraction_supported("unknown") is False
+
+    def test_unsupported_reason_product_sheet(self):
+        reason = get_unsupported_reason("product_sheet")
+        assert "Product sheets" in reason
+        assert "schema" in reason.lower()
+
+    def test_unsupported_reason_pricing(self):
+        reason = get_unsupported_reason("pricing")
+        assert "Pricing" in reason
+        assert "age_brackets" in reason
+
+    def test_unsupported_reason_unknown_type(self):
+        reason = get_unsupported_reason("mystery_doc")
+        assert "not recognised" in reason
+
+    def test_unsupported_reason_all_types_have_descriptions(self):
+        """Every recognised unsupported type should have a specific reason."""
+        for doc_type in RECOGNISED_UNSUPPORTED_TYPES:
+            reason = get_unsupported_reason(doc_type)
+            assert "not recognised" not in reason, f"{doc_type} should have a specific description"

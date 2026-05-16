@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from anthropic import Anthropic
 from anthropic.types import Message, ToolUseBlock
 
+from src.structured_extraction.document_loader import (
+    get_unsupported_reason,
+    is_extraction_supported,
+)
 from src.structured_extraction.schemas import (
     DocumentType,
     ExtractionResult,
@@ -224,6 +228,20 @@ def extract_document(
     Returns:
         ExtractionResult with the structured extraction or errors.
     """
+    # --- Graceful degradation for unsupported document types ---
+    # Block extraction BEFORE making an API call (save cost + avoid bad data)
+    if not is_extraction_supported(document_type):
+        reason = get_unsupported_reason(document_type)
+        return ExtractionResult(
+            document_type=_safe_document_type(document_type),
+            source_file=source_file,
+            extraction_errors=[
+                f"Document type '{document_type}' is not supported for extraction. "
+                f"{reason} "
+                "Skipping API call to avoid forcing an inappropriate schema."
+            ],
+        )
+
     if client is None:
         client = Anthropic()
 
